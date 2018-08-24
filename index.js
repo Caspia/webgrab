@@ -4,13 +4,13 @@ const getHeaders = require('./lib/getHeaders');
 const fetch = require('node-fetch');
 
 /* */
-var webdriver = require('selenium-webdriver'),
-    By = webdriver.By,
-    until = webdriver.until;
+const webdriver = require('selenium-webdriver');
+const By = webdriver.By;
+// const until = webdriver.until;
 
-var driver = new webdriver.Builder()
-    .forBrowser('firefox')
-    .build();
+const driver = new webdriver.Builder()
+  .forBrowser('firefox')
+  .build();
 
 const seenSites = new Set();
 const pendingSites = new Set();
@@ -23,14 +23,14 @@ function clone(obj) {
 
 let siteList = [
   {
-    site: "https://nodejs.org",
+    site: 'https://nodejs.org',
     getChildren: true,
     dontGetChildren: [],
     alsoGetChildren: [],
     expandChildren: false,
     dontExpandChildren: [/download\/releases/],
-    alsoExpandChildren: [/newsletter\.npmjs\.org/],
-  },
+    alsoExpandChildren: [/newsletter\.npmjs\.org/]
+  }
 ];
 
 function normalizeSiteList(siteList) {
@@ -42,7 +42,7 @@ function normalizeSiteList(siteList) {
     expandChildren: true,
     alsoExpandChildren: [],
     dontExpandChildren: []
-  }
+  };
 
   const newSiteList = [];
   siteList.forEach(site => {
@@ -58,7 +58,7 @@ function normalizeSiteList(siteList) {
       if (!site.site) {
         throw new Error(`items in the site list must include the site uri: ${prettyFormat(site)}`);
       }
-      for (property in site) {
+      for (const property in site) {
         siteObject[property] = site[property];
       }
     }
@@ -79,7 +79,7 @@ async function loadURI(uri) {
     if (contentType !== 'text/html' && contentType !== 'application/xhtml+xml') {
       // download anyway to cache
       console.log('Using fetch to cache non-html uri ' + uri);
-      const response = fetch(uri);
+      await fetch(uri);
       return [];
     }
     const hrefUris = new Set();
@@ -106,11 +106,13 @@ async function loadURI(uri) {
     const entries = [];
     hrefUris.forEach(entry => entries.push(entry));
     return entries;
-  } catch(err) {console.log(err);}
+  } catch (err) {
+    console.log(err);
+  }
 }
 
 /* */
-(async function doit () {
+(async function doit() {
   siteList.forEach(siteItem => {
     const uri = siteItem.site;
     if (!pendingSites.has(uri)) {
@@ -140,7 +142,7 @@ async function loadURI(uri) {
           if (regex.test(ref)) {
             getMe = true;
           }
-        })
+        });
         // but reject certain other sites
         siteItem.dontGetChildren.forEach(regex => {
           if (regex.test(ref)) {
@@ -159,8 +161,8 @@ async function loadURI(uri) {
             if (regex.test(ref)) {
               expandChildren = false;
             }
-          })
-          childItem = clone(siteItem);
+          });
+          const childItem = clone(siteItem);
           childItem.site = ref;
           childItem.getChildren = expandChildren;
           siteQueue.push(childItem);
