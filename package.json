@@ -1,0 +1,22 @@
+{
+  "name": "webgrab",
+  "version": "1.0.0",
+  "description": "Driver for an offline web cache to load websites in a browser for caching",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caspia/webgrab.git"
+  },
+  "author": "R. Kent James <kent@caspia.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/caspia/webgrab.get/issues"
+  },
+  "homepage": "https://github.com/caspia/webgrab.get#readme",
+  "devDependencies": {
+    "mocha": "^5.2.0"
+  }
+}
