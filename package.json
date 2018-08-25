@@ -4,7 +4,8 @@
   "description": "Driver for an offline web cache to load websites in a browser for caching",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha",
+    "docs": "jsdoc -c jsdoc.json"
   },
   "repository": {
     "type": "git",
@@ -13,9 +14,9 @@
   "author": "R. Kent James <kent@caspia.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/caspia/webgrab.get/issues"
+    "url": "https://github.com/caspia/webgrab.git/issues"
   },
-  "homepage": "https://github.com/caspia/webgrab.get#readme",
+  "homepage": "https://github.com/caspia/webgrab.git#readme",
   "devDependencies": {
     "eslint": "^5.4.0",
     "eslint-config-standard": "^11.0.0",
@@ -23,6 +24,7 @@
     "eslint-plugin-node": "^7.0.1",
     "eslint-plugin-promise": "^4.0.0",
     "eslint-plugin-standard": "^3.1.0",
+    "jsdoc": "^3.5.5",
     "mocha": "^5.2.0"
   }
 }

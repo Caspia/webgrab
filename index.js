@@ -1,22 +1,22 @@
+/**
+ * Load websites and links to populate an offline cache.
+ * @file
+ * @author R. Kent James <kent@caspia.com>
+ */
+
 const prettyFormat = require('pretty-format');
 const URL = require('url').URL;
 const getHeaders = require('./lib/getHeaders');
 const fetch = require('node-fetch');
 
-/* */
 const webdriver = require('selenium-webdriver');
 const By = webdriver.By;
-// const until = webdriver.until;
 
-const driver = new webdriver.Builder()
-  .forBrowser('firefox')
-  .build();
-
-const seenSites = new Set();
-const pendingSites = new Set();
-const siteQueue = [];
-/* */
-
+/**
+ * Clone a simple js object
+ * @param {Object} obj  the object to clone
+ * @returns {Object} the cloned of the object
+ */
 function clone(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
@@ -33,6 +33,24 @@ let siteList = [
   }
 ];
 
+/**
+ * @typedef SiteItem Object representing a uri to get and handling of its ref expansions
+ * @type {Object}
+ * @property site {string} - the uri to get
+ * @property getChildren {boolean} - should we also get the children of this uri?
+ * @property alsoGetChildren {RegExp[]} - additional uri references to get, that do not match the
+ *   host of the main site uri. These regular expressions are applied to the reference uri.
+ * @property dontGetChildren {RegExp[]} - uri references to reject getting
+ * @property expandChildren {true} - should we expand the references of this site's children?
+ * @property alsoExpandChildren {RegExp[]} - uri references to also expand that do not match the site host
+ * @property dontExpandChildren {RegExp[]} - uri references to reject expanding
+ */
+/**
+ * Given a list of uris (strings or objects), convert to objects, adding defaults
+ * @param {Array.<SiteItem|string>} siteList list of web uris, with optional expansion parameters. Strings
+ *   are to use the default ref expansion options.
+ * @returns {SiteItems[]} Converted string uris to SiteItem, also fills in missing defaults.
+ */
 function normalizeSiteList(siteList) {
   const siteDefault = {
     site: '',
@@ -69,7 +87,14 @@ function normalizeSiteList(siteList) {
 
 siteList = normalizeSiteList(siteList);
 
-async function loadURI(uri) {
+/**
+ * loads a uri from the web
+ * @param {string} uri the uri to load
+ * @param {ThenableWebDriver} Selenium web driver object.
+ * @returns {string[]} array of uri references from the <a> tags in the website
+ * @see {@link {http://seleniumhq.github.io/selenium/docs/api/javascript/module/selenium-webdriver/}}
+ */
+async function loadURI(uri, driver) {
   try {
     console.log('loading ' + uri);
     const headers = await getHeaders(uri);
@@ -111,8 +136,20 @@ async function loadURI(uri) {
   }
 }
 
-/* */
-(async function doit() {
+/**
+ * The main method of this script
+ * @function
+ */
+async function main() {
+  const driver = new webdriver.Builder()
+    .forBrowser('firefox')
+    .build();
+
+  const seenSites = new Set();
+  const pendingSites = new Set();
+  const siteQueue = [];
+
+  // Queue the starting list of sites for processing.
   siteList.forEach(siteItem => {
     const uri = siteItem.site;
     if (!pendingSites.has(uri)) {
@@ -121,12 +158,13 @@ async function loadURI(uri) {
     }
   });
 
+  // Main loop to process sites
   for (let siteItem = siteQueue.shift(); siteItem; siteItem = siteQueue.shift()) {
     const uri = siteItem.site;
     console.log('uri is ' + uri);
     pendingSites.delete(uri);
     seenSites.add(uri);
-    const siteRefs = await loadURI(uri);
+    const siteRefs = await loadURI(uri, driver);
     console.log(`found ${siteRefs.length} refs`);
     const uriObj = new URL(uri);
     const currentHost = uriObj.host;
@@ -149,8 +187,11 @@ async function loadURI(uri) {
             getMe = false;
           }
         });
+
         if (getMe && !seenSites.has(ref) && !pendingSites.has(ref)) {
           pendingSites.add(ref);
+
+          // set the child getChildren option based on the parent expandChildren
           let expandChildren = siteItem.expandChildren;
           siteItem.alsoExpandChildren.forEach(regex => {
             if (regex.test(ref)) {
@@ -172,6 +213,6 @@ async function loadURI(uri) {
     console.log(`siteQueue length is ${siteQueue.length}`);
   }
   driver.quit();
-})();
+}
 
-/* */
+main();
