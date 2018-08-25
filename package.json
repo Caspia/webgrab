@@ -25,10 +25,10 @@
     "eslint-plugin-promise": "^4.0.0",
     "eslint-plugin-standard": "^3.1.0",
     "jsdoc": "^3.5.5",
-    "mocha": "^5.2.0"
+    "mocha": "^5.2.0",
+    "winston": "^3.0.0"
   },
   "dependencies": {
-    "chalk": "^2.4.1",
     "clone": "^2.1.2",
     "fs-extra": "^7.0.0",
     "node-fetch": "^2.2.0",

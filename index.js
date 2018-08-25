@@ -1,10 +1,10 @@
 /**
  * Load websites and links to populate an offline cache.
- * @file
- * @author R. Kent James <kent@caspia.com>
  *
  * Usage: node index.js <someConfigFile.json>
  * (If the config file is omitted,defauts to config.json)
+ * @file
+ * @author R. Kent James <kent@caspia.com>
  */
 
 const prettyFormat = require('pretty-format');
@@ -13,9 +13,9 @@ const URL = require('url').URL;
 const fetch = require('node-fetch');
 const fs = require('fs-extra');
 const webdriver = require('selenium-webdriver');
-const chalk = require('chalk');
 
 const getHeaders = require('./lib/getHeaders');
+const logging = require('./lib/logging');
 const By = webdriver.By;
 
 /**
@@ -96,14 +96,15 @@ function normalizeSiteList(siteList) {
  * @see {@link {http://seleniumhq.github.io/selenium/docs/api/javascript/module/selenium-webdriver/}}
  */
 async function loadURI(uri, driver) {
+  const log = logging.log;
   try {
-    console.log(chalk.green('loading ' + uri));
+    log.verbose('loading ' + uri);
     const headers = await getHeaders(uri);
     const contentType = headers.get('Content-Type');
     // Don't ask ask the browser to download non-html
     if (contentType !== 'text/html' && contentType !== 'application/xhtml+xml') {
       // download anyway to cache
-      console.log('Content-type: ' + contentType + ' Using fetch to cache non-html uri ' + uri);
+      log.verbose('Content-type: ' + contentType + ' Using fetch to cache non-html uri ' + uri);
       await fetch(uri);
       return [];
     }
@@ -112,7 +113,7 @@ async function loadURI(uri, driver) {
     const documentURI = await driver.executeScript('return document.documentURI');
 
     const elements = await driver.findElements(By.css('a'));
-    console.log(`elements.length is ${elements.length}`);
+    log.verbose(`references length is ${elements.length}`);
     const promiseNames = [];
     elements.forEach(element => {
       promiseNames.push(driver.executeScript('return arguments[0].getAttribute("href")', element));
@@ -129,7 +130,7 @@ async function loadURI(uri, driver) {
     hrefUris.forEach(entry => entries.push(entry));
     return entries;
   } catch (err) {
-    console.log(err);
+    log.error(err);
   }
 }
 
@@ -138,12 +139,15 @@ async function loadURI(uri, driver) {
  * @function
  */
 async function main() {
+  const logFilePath = process.env.WEBGRAB_LOGFILEPATH || process.env.HOME + '/logs';
+  const log = logging.setupLogging(logFilePath);
+
   // Get the configuration file path from the cli, or use a default.
   const [configFileCli] = process.argv.slice(2);
   const configFile = configFileCli || 'config.json';
 
   // read the configuration from a file
-  console.log('configFile is ' + configFile);
+  log.info('configFile is ' + configFile);
   const siteList = normalizeSiteList(JSON.parse(fs.readFileSync(configFile)));
 
   // setup Selenium
@@ -221,7 +225,7 @@ async function main() {
         }
       });
     }
-    console.log(chalk.bgBlue(`siteQueue length is ${siteQueue.length}`));
+    log.info(`queue ${siteQueue.length} uri ${uri}`);
   }
   driver.quit();
 }
