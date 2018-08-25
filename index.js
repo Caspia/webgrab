@@ -2,51 +2,40 @@
  * Load websites and links to populate an offline cache.
  * @file
  * @author R. Kent James <kent@caspia.com>
+ *
+ * Usage: node index.js <someConfigFile.json>
+ * (If the config file is omitted,defauts to config.json)
  */
 
 const prettyFormat = require('pretty-format');
+const clone = require('clone');
 const URL = require('url').URL;
-const getHeaders = require('./lib/getHeaders');
 const fetch = require('node-fetch');
-
+const fs = require('fs-extra');
 const webdriver = require('selenium-webdriver');
+const chalk = require('chalk');
+
+const getHeaders = require('./lib/getHeaders');
 const By = webdriver.By;
-
-/**
- * Clone a simple js object
- * @param {Object} obj  the object to clone
- * @returns {Object} the cloned of the object
- */
-function clone(obj) {
-  return JSON.parse(JSON.stringify(obj));
-}
-
-let siteList = [
-  {
-    site: 'https://nodejs.org',
-    getChildren: true,
-    dontGetChildren: [],
-    alsoGetChildren: [],
-    expandChildren: false,
-    dontExpandChildren: [/download\/releases/],
-    alsoExpandChildren: [/newsletter\.npmjs\.org/]
-  }
-];
 
 /**
  * @typedef SiteItem Object representing a uri to get and handling of its ref expansions
  * @type {Object}
  * @property site {string} - the uri to get
  * @property getChildren {boolean} - should we also get the children of this uri?
- * @property alsoGetChildren {RegExp[]} - additional uri references to get, that do not match the
- *   host of the main site uri. These regular expressions are applied to the reference uri.
- * @property dontGetChildren {RegExp[]} - uri references to reject getting
+ * @property alsoGetChildren {RegExp[]|string} - additional uri references to get, that do not match the
+ *   host of the main site uri. These regular expressions are applied to the reference uri. Strings should
+ *   be representations of a regular expressions, and are converted internally to regular expressions.
+ *   (Applies to alsoGetChildren, dontGetChildren, alsoExpandChildren, and dontExpandChildren)
+ * @property dontGetChildren {RegExp[]|string} - uri references to reject getting
  * @property expandChildren {true} - should we expand the references of this site's children?
- * @property alsoExpandChildren {RegExp[]} - uri references to also expand that do not match the site host
- * @property dontExpandChildren {RegExp[]} - uri references to reject expanding
+ * @property alsoExpandChildren {RegExp[]|string} - uri references to also expand that do not match the site host
+ * @property dontExpandChildren {RegExp[]|string} - uri references to reject expanding
  */
+
 /**
- * Given a list of uris (strings or objects), convert to objects, adding defaults
+ * Given a list of uris (strings or objects), convert to objects, adding defaults. Also converts strings
+ * to regular expressions where appropriate.
  * @param {Array.<SiteItem|string>} siteList list of web uris, with optional expansion parameters. Strings
  *   are to use the default ref expansion options.
  * @returns {SiteItems[]} Converted string uris to SiteItem, also fills in missing defaults.
@@ -72,6 +61,20 @@ function normalizeSiteList(siteList) {
       if (!(typeof site === 'object')) {
         throw new Error(`items in the site list must be strings or objects: ${prettyFormat(site)}`);
       }
+      // convert string regexp to objects
+      for (const name of ['alsoGetChildren', 'dontGetChildren', 'alsoExpandChildren', 'dontExpandChildren']) {
+        if (site[name]) {
+          const nameArray = [];
+          site[name].forEach(item => {
+            if (typeof item === 'string') {
+              nameArray.push(new RegExp(item, 'i'));
+            } else {
+              nameArray.push(site[name]);
+            }
+          });
+          site[name] = nameArray;
+        }
+      }
       // fill in set values
       if (!site.site) {
         throw new Error(`items in the site list must include the site uri: ${prettyFormat(site)}`);
@@ -85,34 +88,28 @@ function normalizeSiteList(siteList) {
   return newSiteList;
 }
 
-siteList = normalizeSiteList(siteList);
-
 /**
  * loads a uri from the web
  * @param {string} uri the uri to load
- * @param {ThenableWebDriver} Selenium web driver object.
+ * @param {ThenableWebDriver} driver Selenium web driver object.
  * @returns {string[]} array of uri references from the <a> tags in the website
  * @see {@link {http://seleniumhq.github.io/selenium/docs/api/javascript/module/selenium-webdriver/}}
  */
 async function loadURI(uri, driver) {
   try {
-    console.log('loading ' + uri);
+    console.log(chalk.green('loading ' + uri));
     const headers = await getHeaders(uri);
     const contentType = headers.get('Content-Type');
-    console.log('uri content type is ' + contentType);
     // Don't ask ask the browser to download non-html
     if (contentType !== 'text/html' && contentType !== 'application/xhtml+xml') {
       // download anyway to cache
-      console.log('Using fetch to cache non-html uri ' + uri);
+      console.log('Content-type: ' + contentType + ' Using fetch to cache non-html uri ' + uri);
       await fetch(uri);
       return [];
     }
     const hrefUris = new Set();
     await driver.get(uri);
     const documentURI = await driver.executeScript('return document.documentURI');
-    console.log(`documentURI is ${documentURI}`);
-    const documentContentType = await driver.executeScript('return document.contentType');
-    console.log(`contentType is ${documentContentType}`);
 
     const elements = await driver.findElements(By.css('a'));
     console.log(`elements.length is ${elements.length}`);
@@ -141,10 +138,20 @@ async function loadURI(uri, driver) {
  * @function
  */
 async function main() {
+  // Get the configuration file path from the cli, or use a default.
+  const [configFileCli] = process.argv.slice(2);
+  const configFile = configFileCli || 'config.json';
+
+  // read the configuration from a file
+  console.log('configFile is ' + configFile);
+  const siteList = normalizeSiteList(JSON.parse(fs.readFileSync(configFile)));
+
+  // setup Selenium
   const driver = new webdriver.Builder()
     .forBrowser('firefox')
     .build();
 
+  // The main objects controlling sites to get.
   const seenSites = new Set();
   const pendingSites = new Set();
   const siteQueue = [];
@@ -160,21 +167,26 @@ async function main() {
 
   // Main loop to process sites
   for (let siteItem = siteQueue.shift(); siteItem; siteItem = siteQueue.shift()) {
+    // load the uri for the current item, getting the references
     const uri = siteItem.site;
-    console.log('uri is ' + uri);
     pendingSites.delete(uri);
-    seenSites.add(uri);
     const siteRefs = await loadURI(uri, driver);
-    console.log(`found ${siteRefs.length} refs`);
+    seenSites.add(uri);
+
+    // manage handling of child references of this site
     const uriObj = new URL(uri);
     const currentHost = uriObj.host;
 
     if (siteItem.getChildren) {
       siteRefs.forEach(ref => {
+        if (seenSites.has(ref) || pendingSites.has(ref)) {
+          return; // already processed this site
+        }
+
+        // Should we get this reference uri?
         const refObject = new URL(ref);
-        let getMe = false;
         // by default, get if hosts match
-        if (refObject.host === currentHost) getMe = true;
+        let getMe = refObject.host === currentHost;
         // but allow certain other sites
         siteItem.alsoGetChildren.forEach(regex => {
           if (regex.test(ref)) {
@@ -188,9 +200,7 @@ async function main() {
           }
         });
 
-        if (getMe && !seenSites.has(ref) && !pendingSites.has(ref)) {
-          pendingSites.add(ref);
-
+        if (getMe) {
           // set the child getChildren option based on the parent expandChildren
           let expandChildren = siteItem.expandChildren;
           siteItem.alsoExpandChildren.forEach(regex => {
@@ -206,11 +216,12 @@ async function main() {
           const childItem = clone(siteItem);
           childItem.site = ref;
           childItem.getChildren = expandChildren;
+          pendingSites.add(ref);
           siteQueue.push(childItem);
         }
       });
     }
-    console.log(`siteQueue length is ${siteQueue.length}`);
+    console.log(chalk.bgBlue(`siteQueue length is ${siteQueue.length}`));
   }
   driver.quit();
 }

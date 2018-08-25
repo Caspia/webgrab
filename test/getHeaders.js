@@ -1,3 +1,4 @@
+// Test the getHeader module
 const getHeaders = require('../lib/getHeaders');
 const assert = require('assert');
 

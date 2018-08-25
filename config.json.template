@@ -1,0 +1,11 @@
+[
+  {
+    "site": "https://nodejs.org",
+    "getChildren": true,
+    "dontGetChildren": [],
+    "alsoGetChildren": [],
+    "expandChildren": false,
+    "dontExpandChildren": ["/download\/releases/"],
+    "alsoExpandChildren": ["/newsletter\\.npmjs\\.org/"]
+  }
+]
