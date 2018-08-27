@@ -31,6 +31,7 @@ const By = webdriver.By;
  * @property expandChildren {true} - should we expand the references of this site's children?
  * @property alsoExpandChildren {RegExp[]|string} - uri references to also expand that do not match the site host
  * @property dontExpandChildren {RegExp[]|string} - uri references to reject expanding
+ * @property depth {Number} - depth the expand, 0  means do not get children
  */
 
 /**
@@ -48,7 +49,8 @@ function normalizeSiteList(siteList) {
     dontGetChildren: [],
     expandChildren: true,
     alsoExpandChildren: [],
-    dontExpandChildren: []
+    dontExpandChildren: [],
+    depth: 100
   };
 
   const newSiteList = [];
@@ -114,13 +116,13 @@ async function loadURI(uri, driver) {
 
     const elements = await driver.findElements(By.css('a'));
     log.verbose(`references length is ${elements.length}`);
-    const promiseNames = [];
+    const promiseHrefs = [];
     elements.forEach(element => {
-      promiseNames.push(driver.executeScript('return arguments[0].getAttribute("href")', element));
+      promiseHrefs.push(driver.executeScript('return arguments[0].getAttribute("href")', element));
     });
-    const hrefs = await Promise.all(promiseNames);
+    const hrefs = await Promise.all(promiseHrefs);
     hrefs.forEach(href => {
-      if (href === '#') return;
+      if (href === '#') return; // TODO - handle these
       const uriObj = new URL(href, documentURI);
       // references are dups
       uriObj.hash = '';
@@ -181,7 +183,7 @@ async function main() {
     const uriObj = new URL(uri);
     const currentHost = uriObj.host;
 
-    if (siteItem.getChildren) {
+    if (siteItem.getChildren && siteItem.depth > 0) {
       siteRefs.forEach(ref => {
         if (seenSites.has(ref) || pendingSites.has(ref)) {
           return; // already processed this site
@@ -220,8 +222,12 @@ async function main() {
           const childItem = clone(siteItem);
           childItem.site = ref;
           childItem.getChildren = expandChildren;
+          childItem.depth--;
           pendingSites.add(ref);
           siteQueue.push(childItem);
+          log.verbose(`Add to site queue: ${ref}`);
+        } else {
+          log.verbose(`Not adding to site queue: ${ref}`);
         }
       });
     }

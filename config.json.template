@@ -6,6 +6,7 @@
     "alsoGetChildren": [],
     "expandChildren": false,
     "dontExpandChildren": ["/download\/releases/"],
-    "alsoExpandChildren": ["/newsletter\\.npmjs\\.org/"]
+    "alsoExpandChildren": ["/newsletter\\.npmjs\\.org/"],
+    "depth": 2
   }
 ]
