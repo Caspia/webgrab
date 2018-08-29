@@ -3,10 +3,18 @@
 # Use iptables (on a Linux system) to route http and https packets to
 # an instance of offlineweb
 #
-# Usage: sudo ./webroute.sh <ipaddress>
+# Usage: sudo ./webroute.sh <ipaddress> [remove]
 #   where <ipaddress> is the address of an offlineweb instance
+#   optional parameter 'remove' will remove the iptables entry 
 #
-echo "Routing web requests to $1"
-iptables -t nat -F OUTPUT
-iptables -t nat -A OUTPUT -p tcp --dport 80 -j DNAT --to-destination $1:80
-iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $1:443
+
+iptables -t nat -D OUTPUT -p tcp --dport 80 -j DNAT --to-destination $1:80 2>/dev/null
+iptables -t nat -D OUTPUT -p tcp --dport 443 -j DNAT --to-destination $1:443 2>/dev/null
+if [ "OPT $2" != "OPT remove" ]
+then
+  echo "Routing web requests to $1"
+  iptables -t nat -A OUTPUT -p tcp --dport 80 -j DNAT --to-destination $1:80
+  iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $1:443
+else
+  echo "Removing entries to route requests"
+fi
