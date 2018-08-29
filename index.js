@@ -104,7 +104,7 @@ async function loadURI(uri, driver) {
     const headers = await getHeaders(uri);
     const contentType = headers.get('Content-Type');
     // Don't ask ask the browser to download non-html
-    if (contentType !== 'text/html' && contentType !== 'application/xhtml+xml') {
+    if (!contentType.startsWith('text/html') && !contentType.startsWith('application/xhtml+xml')) {
       // download anyway to cache
       log.verbose('Content-type: ' + contentType + ' Using fetch to cache non-html uri ' + uri);
       await fetch(uri);
@@ -132,7 +132,8 @@ async function loadURI(uri, driver) {
     hrefUris.forEach(entry => entries.push(entry));
     return entries;
   } catch (err) {
-    log.error(err);
+    log.error(err.stack);
+    throw err;
   }
 }
 
@@ -142,6 +143,7 @@ async function loadURI(uri, driver) {
  */
 async function main() {
   const logFilePath = process.env.WEBGRAB_LOGFILEPATH || process.env.HOME + '/logs';
+  console.log('Logging to ' + logFilePath);
   const log = logging.setupLogging(logFilePath);
 
   // Get the configuration file path from the cli, or use a default.
@@ -173,65 +175,71 @@ async function main() {
 
   // Main loop to process sites
   for (let siteItem = siteQueue.shift(); siteItem; siteItem = siteQueue.shift()) {
-    // load the uri for the current item, getting the references
     const uri = siteItem.site;
-    pendingSites.delete(uri);
-    const siteRefs = await loadURI(uri, driver);
-    seenSites.add(uri);
+    try {
+      // load the uri for the current item, getting the references
+      pendingSites.delete(uri);
+      const siteRefs = await loadURI(uri, driver);
+      seenSites.add(uri);
+      if (siteRefs) {
+        log.verbose(`${siteRefs.length} references found for site ${uri}`);
+      }
+      // manage handling of child references of this site
+      const uriObj = new URL(uri);
+      const currentHost = uriObj.host;
 
-    // manage handling of child references of this site
-    const uriObj = new URL(uri);
-    const currentHost = uriObj.host;
-
-    if (siteItem.getChildren && siteItem.depth > 0) {
-      siteRefs.forEach(ref => {
-        if (seenSites.has(ref) || pendingSites.has(ref)) {
-          return; // already processed this site
-        }
-
-        // Should we get this reference uri?
-        const refObject = new URL(ref);
-        // by default, get if hosts match
-        let getMe = refObject.host === currentHost;
-        // but allow certain other sites
-        siteItem.alsoGetChildren.forEach(regex => {
-          if (regex.test(ref)) {
-            getMe = true;
+      if (siteItem.getChildren && siteItem.depth > 0) {
+        siteRefs.forEach(ref => {
+          if (seenSites.has(ref) || pendingSites.has(ref)) {
+            return; // already processed this site
           }
-        });
-        // but reject certain other sites
-        siteItem.dontGetChildren.forEach(regex => {
-          if (regex.test(ref)) {
-            getMe = false;
-          }
-        });
 
-        if (getMe) {
-          // set the child getChildren option based on the parent expandChildren
-          let expandChildren = siteItem.expandChildren;
-          siteItem.alsoExpandChildren.forEach(regex => {
+          // Should we get this reference uri?
+          const refObject = new URL(ref);
+          // by default, get if hosts match
+          let getMe = refObject.host === currentHost;
+          // but allow certain other sites
+          siteItem.alsoGetChildren.forEach(regex => {
             if (regex.test(ref)) {
-              expandChildren = true;
+              getMe = true;
             }
           });
-          siteItem.dontExpandChildren.forEach(regex => {
+          // but reject certain other sites
+          siteItem.dontGetChildren.forEach(regex => {
             if (regex.test(ref)) {
-              expandChildren = false;
+              getMe = false;
             }
           });
-          const childItem = clone(siteItem);
-          childItem.site = ref;
-          childItem.getChildren = expandChildren;
-          childItem.depth--;
-          pendingSites.add(ref);
-          siteQueue.push(childItem);
-          log.verbose(`Add to site queue: ${ref}`);
-        } else {
-          log.verbose(`Not adding to site queue: ${ref}`);
-        }
-      });
+
+          if (getMe) {
+            // set the child getChildren option based on the parent expandChildren
+            let expandChildren = siteItem.expandChildren;
+            siteItem.alsoExpandChildren.forEach(regex => {
+              if (regex.test(ref)) {
+                expandChildren = true;
+              }
+            });
+            siteItem.dontExpandChildren.forEach(regex => {
+              if (regex.test(ref)) {
+                expandChildren = false;
+              }
+            });
+            const childItem = clone(siteItem);
+            childItem.site = ref;
+            childItem.getChildren = expandChildren;
+            childItem.depth--;
+            pendingSites.add(ref);
+            siteQueue.push(childItem);
+            log.verbose(`Add to site queue: ${ref}`);
+          } else {
+            log.verbose(`Not adding to site queue: ${ref}`);
+          }
+        });
+      }
+      log.info(`queue ${siteQueue.length} uri ${uri}`);
+    } catch (err) {
+      log.error(`failure getting ${uri}: ${err.stack}`);
     }
-    log.info(`queue ${siteQueue.length} uri ${uri}`);
   }
   driver.quit();
 }
