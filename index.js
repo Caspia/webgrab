@@ -100,8 +100,13 @@ function normalizeSiteList(siteList) {
 async function loadURI(uri, driver) {
   const log = logging.log;
   try {
-    log.verbose('loading ' + uri);
-    const headers = await getHeaders(uri);
+    /**/
+    log.info('loadURI: loading ' + uri);
+    try {
+      var headers = await getHeaders(uri);
+    } catch (err) {
+      throw new Error('failure in getHeaders: ' + err.stack);
+    }
     const contentType = headers.get('Content-Type');
     // Don't ask ask the browser to download non-html
     if (!contentType.startsWith('text/html') && !contentType.startsWith('application/xhtml+xml')) {
@@ -110,7 +115,9 @@ async function loadURI(uri, driver) {
       await fetch(uri);
       return [];
     }
+    /**/
     const hrefUris = new Set();
+    log.verbose(`loading uri ${uri} with driver`);
     await driver.get(uri);
     const documentURI = await driver.executeScript('return document.documentURI');
 
@@ -132,8 +139,7 @@ async function loadURI(uri, driver) {
     hrefUris.forEach(entry => entries.push(entry));
     return entries;
   } catch (err) {
-    log.error(err.stack);
-    throw err;
+    throw new Error(`Failure in loadURI: ${err.stack}`, err);
   }
 }
 
@@ -155,9 +161,14 @@ async function main() {
   const siteList = normalizeSiteList(JSON.parse(fs.readFileSync(configFile)));
 
   // setup Selenium
-  const driver = new webdriver.Builder()
-    .forBrowser('firefox')
+  // I should really figure out how to get the correct ca.crt loaded here.
+  var driver = new webdriver.Builder()
+    // .forBrowser('firefox')
+    .withCapabilities(webdriver.Capabilities.firefox().set('acceptInsecureCerts', true))
     .build();
+
+  // see https://stackoverflow.com/questions/31673587/error-unable-to-verify-the-first-certificate-in-nodejs
+  require('https').globalAgent.options.ca = fs.readFileSync('ca.crt');
 
   // The main objects controlling sites to get.
   const seenSites = new Set();
@@ -198,30 +209,30 @@ async function main() {
           const refObject = new URL(ref);
           // by default, get if hosts match
           let getMe = refObject.host === currentHost;
+          // but reject certain sites
+          siteItem.dontGetChildren.forEach(regex => {
+            if (regex.test(ref)) {
+              getMe = false;
+            }
+          });
           // but allow certain other sites
           siteItem.alsoGetChildren.forEach(regex => {
             if (regex.test(ref)) {
               getMe = true;
             }
           });
-          // but reject certain other sites
-          siteItem.dontGetChildren.forEach(regex => {
-            if (regex.test(ref)) {
-              getMe = false;
-            }
-          });
 
           if (getMe) {
             // set the child getChildren option based on the parent expandChildren
             let expandChildren = siteItem.expandChildren;
-            siteItem.alsoExpandChildren.forEach(regex => {
-              if (regex.test(ref)) {
-                expandChildren = true;
-              }
-            });
             siteItem.dontExpandChildren.forEach(regex => {
               if (regex.test(ref)) {
                 expandChildren = false;
+              }
+            });
+            siteItem.alsoExpandChildren.forEach(regex => {
+              if (regex.test(ref)) {
+                expandChildren = true;
               }
             });
             const childItem = clone(siteItem);
