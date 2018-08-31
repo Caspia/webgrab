@@ -1,3 +1,5 @@
+#!/usr/bin/node
+
 /**
  * Load websites and links to populate an offline cache.
  *
@@ -17,6 +19,7 @@ const webdriver = require('selenium-webdriver');
 const getHeaders = require('./lib/getHeaders');
 const logging = require('./lib/logging');
 const By = webdriver.By;
+const commander = require('commander');
 
 /**
  * @typedef SiteItem Object representing a uri to get and handling of its ref expansions
@@ -148,13 +151,20 @@ async function loadURI(uri, driver) {
  * @function
  */
 async function main() {
+  // command line parameter setup
+  commander
+    .option('-c, --config-file [filepath]', 'Specify an alternative config file (default config.json)', 'config.json')
+    .option('-p, --public-ca', 'Use the public certificate authorities instead of the custom')
+    .option('-r, --references-only', 'Only log references when depth reaches 0 rather than get')
+    .parse(process.argv);
+
+  const configFile = commander.configFile;
+  const publicCa = commander.publicCa;
+  const referencesOnly = commander.referencesOnly;
+
   const logFilePath = process.env.WEBGRAB_LOGFILEPATH || process.env.HOME + '/logs';
   console.log('Logging to ' + logFilePath);
   const log = logging.setupLogging(logFilePath);
-
-  // Get the configuration file path from the cli, or use a default.
-  const [configFileCli] = process.argv.slice(2);
-  const configFile = configFileCli || 'config.json';
 
   // read the configuration from a file
   log.info('configFile is ' + configFile);
@@ -163,12 +173,14 @@ async function main() {
   // setup Selenium
   // I should really figure out how to get the correct ca.crt loaded here.
   var driver = new webdriver.Builder()
-    // .forBrowser('firefox')
-    .withCapabilities(webdriver.Capabilities.firefox().set('acceptInsecureCerts', true))
+    .forBrowser('firefox')
+    //.withCapabilities(webdriver.Capabilities.firefox().set('acceptInsecureCerts', true))
     .build();
 
   // see https://stackoverflow.com/questions/31673587/error-unable-to-verify-the-first-certificate-in-nodejs
-  require('https').globalAgent.options.ca = fs.readFileSync('ca.crt');
+  if (!publicCa) {
+    require('https').globalAgent.options.ca = fs.readFileSync('ca.crt');
+  }
 
   // The main objects controlling sites to get.
   const seenSites = new Set();
@@ -199,6 +211,7 @@ async function main() {
       const uriObj = new URL(uri);
       const currentHost = uriObj.host;
 
+      console.log(`getChildren ${siteItem.getChildren} depth ${siteItem.depth} uri ${uri}`);
       if (siteItem.getChildren && siteItem.depth > 0) {
         siteRefs.forEach(ref => {
           if (seenSites.has(ref) || pendingSites.has(ref)) {
@@ -239,9 +252,13 @@ async function main() {
             childItem.site = ref;
             childItem.getChildren = expandChildren;
             childItem.depth--;
-            pendingSites.add(ref);
-            siteQueue.push(childItem);
-            log.verbose(`Add to site queue: ${ref}`);
+            let wouldDo = '(would) ';
+            if (!referencesOnly || childItem.depth > 0) {
+              pendingSites.add(ref);
+              siteQueue.push(childItem);
+              wouldDo = '';
+            }
+            log.verbose(`${wouldDo}Add to site queue: ${ref}`);
           } else {
             log.verbose(`Not adding to site queue: ${ref}`);
           }

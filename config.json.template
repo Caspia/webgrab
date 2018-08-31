@@ -5,8 +5,8 @@
     "dontGetChildren": [],
     "alsoGetChildren": [],
     "expandChildren": false,
-    "dontExpandChildren": ["/download\/releases/"],
-    "alsoExpandChildren": ["/newsletter\\.npmjs\\.org/"],
-    "depth": 2
+    "dontExpandChildren": ["\/download\/releases\/"],
+    "alsoExpandChildren": ["\/newsletter\\.npmjs\\.org\/"],
+    "depth": 1
   }
 ]
