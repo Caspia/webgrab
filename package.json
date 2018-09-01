@@ -34,6 +34,6 @@
     "fs-extra": "^7.0.0",
     "node-fetch": "^2.2.0",
     "pretty-format": "^23.5.0",
-    "selenium-webdriver": "^4.0.0-alpha.1"
+    "selenium-webdriver": "^3.6.0"
   }
 }

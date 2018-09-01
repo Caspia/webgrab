@@ -126,18 +126,16 @@ async function loadURI(uri, driver) {
 
     const elements = await driver.findElements(By.css('a'));
     log.verbose(`references length is ${elements.length}`);
-    const promiseHrefs = [];
-    elements.forEach(element => {
-      promiseHrefs.push(driver.executeScript('return arguments[0].getAttribute("href")', element));
-    });
-    const hrefs = await Promise.all(promiseHrefs);
-    hrefs.forEach(href => {
-      if (href === '#') return; // TODO - handle these
+
+    for (let element of elements) {
+      const href = await element.getAttribute('href');
+      if (href === '#') continue; // TODO - handle these
       const uriObj = new URL(href, documentURI);
       // references are dups
       uriObj.hash = '';
       hrefUris.add(uriObj.toString());
-    });
+    }
+
     const entries = [];
     hrefUris.forEach(entry => entries.push(entry));
     return entries;
@@ -156,11 +154,16 @@ async function main() {
     .option('-c, --config-file [filepath]', 'Specify an alternative config file (default config.json)', 'config.json')
     .option('-p, --public-ca', 'Use the public certificate authorities instead of the custom')
     .option('-r, --references-only', 'Only log references when depth reaches 0 rather than get')
+    .option('-b, --browser [browser]', 'browser to use (default firefox, allowed firefox or chrome)', 'firefox')
     .parse(process.argv);
 
-  const configFile = commander.configFile;
-  const publicCa = commander.publicCa;
-  const referencesOnly = commander.referencesOnly;
+  const {configFile, publicCa, referencesOnly, browser} = commander;
+
+  const allowedBrowsers = ['firefox', 'chrome'];
+  if (!allowedBrowsers.includes(browser)) {
+    console.log(`specified --browser should be one of ${allowedBrowsers.join()}`);
+    process.exit(1);
+  }
 
   const logFilePath = process.env.WEBGRAB_LOGFILEPATH || process.env.HOME + '/logs';
   console.log('Logging to ' + logFilePath);
@@ -173,8 +176,7 @@ async function main() {
   // setup Selenium
   // I should really figure out how to get the correct ca.crt loaded here.
   var driver = new webdriver.Builder()
-    .forBrowser('firefox')
-    //.withCapabilities(webdriver.Capabilities.firefox().set('acceptInsecureCerts', true))
+    .withCapabilities({browserName: browser, acceptInsecureCerts: true})
     .build();
 
   // see https://stackoverflow.com/questions/31673587/error-unable-to-verify-the-first-certificate-in-nodejs
@@ -211,10 +213,11 @@ async function main() {
       const uriObj = new URL(uri);
       const currentHost = uriObj.host;
 
-      console.log(`getChildren ${siteItem.getChildren} depth ${siteItem.depth} uri ${uri}`);
       if (siteItem.getChildren && siteItem.depth > 0) {
+        let dupsCount = 0;
         siteRefs.forEach(ref => {
           if (seenSites.has(ref) || pendingSites.has(ref)) {
+            dupsCount++;
             return; // already processed this site
           }
 
@@ -263,6 +266,9 @@ async function main() {
             log.verbose(`Not adding to site queue: ${ref}`);
           }
         });
+        log.verbose(`duplicate refs count: ${dupsCount}`);
+      } else {
+        log.verbose(`not getting children for ${uri}`);
       }
       log.info(`queue ${siteQueue.length} uri ${uri}`);
     } catch (err) {
