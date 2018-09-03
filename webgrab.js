@@ -3,7 +3,8 @@
 /**
  * Load websites and links to populate an offline cache.
  *
- * Usage: node index.js <someConfigFile.json>
+ * Usage: node webgrab.js
+ *        node webgrab.js --help (to see options)
  * (If the config file is omitted,defauts to config.json)
  * @file
  * @author R. Kent James <kent@caspia.com>
@@ -20,6 +21,7 @@ const getHeaders = require('./lib/getHeaders');
 const logging = require('./lib/logging');
 const By = webdriver.By;
 const commander = require('commander');
+const TaskRunner = require('./lib/taskrunner');
 
 /**
  * @typedef SiteItem Object representing a uri to get and handling of its ref expansions
@@ -155,9 +157,10 @@ async function main() {
     .option('-p, --public-ca', 'Use the public certificate authorities instead of the custom')
     .option('-r, --references-only', 'Only log references when depth reaches 0 rather than get')
     .option('-b, --browser [browser]', 'browser to use (default firefox, allowed firefox or chrome)', 'firefox')
+    .option('-n, --browsercount [browsercount]', 'Number of instances of the browser to use, default 1', 1)
     .parse(process.argv);
 
-  const {configFile, publicCa, referencesOnly, browser} = commander;
+  const {configFile, publicCa, referencesOnly, browser, browsercount} = commander;
 
   const allowedBrowsers = ['firefox', 'chrome'];
   if (!allowedBrowsers.includes(browser)) {
@@ -175,9 +178,15 @@ async function main() {
 
   // setup Selenium
   // I should really figure out how to get the correct ca.crt loaded here.
-  var driver = new webdriver.Builder()
-    .withCapabilities({browserName: browser, acceptInsecureCerts: true})
-    .build();
+  const taskRunner = new TaskRunner();
+  const drivers = [];
+  for (let count = 0; count < browsercount; count++) {
+    const driver = new webdriver.Builder()
+      .withCapabilities({browserName: browser, acceptInsecureCerts: true})
+      .build();
+    drivers.push(driver);
+  }
+  drivers.forEach(driver => taskRunner.addResource(driver));
 
   // see https://stackoverflow.com/questions/31673587/error-unable-to-verify-the-first-certificate-in-nodejs
   if (!publicCa) {
@@ -199,83 +208,93 @@ async function main() {
   });
 
   // Main loop to process sites
-  for (let siteItem = siteQueue.shift(); siteItem; siteItem = siteQueue.shift()) {
-    const uri = siteItem.site;
-    try {
-      // load the uri for the current item, getting the references
-      pendingSites.delete(uri);
-      const siteRefs = await loadURI(uri, driver);
-      seenSites.add(uri);
-      if (siteRefs) {
-        log.verbose(`${siteRefs.length} references found for site ${uri}`);
-      }
-      // manage handling of child references of this site
-      const uriObj = new URL(uri);
-      const currentHost = uriObj.host;
-
-      if (siteItem.getChildren && siteItem.depth > 0) {
-        let dupsCount = 0;
-        siteRefs.forEach(ref => {
-          if (seenSites.has(ref) || pendingSites.has(ref)) {
-            dupsCount++;
-            return; // already processed this site
+  while (siteQueue.length) {
+    for (let siteItem = siteQueue.shift(); siteItem; siteItem = siteQueue.shift()) {
+      const uri = siteItem.site;
+      const job = async(driver) => {
+        // load the uri for the current item, getting the references
+        pendingSites.delete(uri);
+        const siteRefs = await loadURI(uri, driver);
+        return siteRefs;
+      };
+      const callback = {onFulfilled: (siteRefs) => {
+        try {
+          seenSites.add(uri);
+          if (siteRefs) {
+            log.verbose(`${siteRefs.length} references found for site ${uri}`);
           }
+          // manage handling of child references of this site
+          const uriObj = new URL(uri);
+          const currentHost = uriObj.host;
 
-          // Should we get this reference uri?
-          const refObject = new URL(ref);
-          // by default, get if hosts match
-          let getMe = refObject.host === currentHost;
-          // but reject certain sites
-          siteItem.dontGetChildren.forEach(regex => {
-            if (regex.test(ref)) {
-              getMe = false;
-            }
-          });
-          // but allow certain other sites
-          siteItem.alsoGetChildren.forEach(regex => {
-            if (regex.test(ref)) {
-              getMe = true;
-            }
-          });
+          if (siteItem.getChildren && siteItem.depth > 0) {
+            let dupsCount = 0;
+            siteRefs.forEach(ref => {
+              if (seenSites.has(ref) || pendingSites.has(ref)) {
+                dupsCount++;
+                return; // already processed this site
+              }
 
-          if (getMe) {
-            // set the child getChildren option based on the parent expandChildren
-            let expandChildren = siteItem.expandChildren;
-            siteItem.dontExpandChildren.forEach(regex => {
-              if (regex.test(ref)) {
-                expandChildren = false;
+              // Should we get this reference uri?
+              const refObject = new URL(ref);
+              // by default, get if hosts match
+              let getMe = refObject.host === currentHost;
+              // but reject certain sites
+              siteItem.dontGetChildren.forEach(regex => {
+                if (regex.test(ref)) {
+                  getMe = false;
+                }
+              });
+              // but allow certain other sites
+              siteItem.alsoGetChildren.forEach(regex => {
+                if (regex.test(ref)) {
+                  getMe = true;
+                }
+              });
+
+              if (getMe) {
+                // set the child getChildren option based on the parent expandChildren
+                let expandChildren = siteItem.expandChildren;
+                siteItem.dontExpandChildren.forEach(regex => {
+                  if (regex.test(ref)) {
+                    expandChildren = false;
+                  }
+                });
+                siteItem.alsoExpandChildren.forEach(regex => {
+                  if (regex.test(ref)) {
+                    expandChildren = true;
+                  }
+                });
+                const childItem = clone(siteItem);
+                childItem.site = ref;
+                childItem.getChildren = expandChildren;
+                childItem.depth--;
+                let wouldDo = '(would) ';
+                if (!referencesOnly || childItem.depth > 0) {
+                  pendingSites.add(ref);
+                  siteQueue.push(childItem);
+                  wouldDo = '';
+                }
+                log.verbose(`${wouldDo}Add to site queue: ${ref}`);
+              } else {
+                log.verbose(`Not adding to site queue: ${ref}`);
               }
             });
-            siteItem.alsoExpandChildren.forEach(regex => {
-              if (regex.test(ref)) {
-                expandChildren = true;
-              }
-            });
-            const childItem = clone(siteItem);
-            childItem.site = ref;
-            childItem.getChildren = expandChildren;
-            childItem.depth--;
-            let wouldDo = '(would) ';
-            if (!referencesOnly || childItem.depth > 0) {
-              pendingSites.add(ref);
-              siteQueue.push(childItem);
-              wouldDo = '';
-            }
-            log.verbose(`${wouldDo}Add to site queue: ${ref}`);
+            log.verbose(`duplicate refs count: ${dupsCount}`);
           } else {
-            log.verbose(`Not adding to site queue: ${ref}`);
+            log.verbose(`not getting children for ${uri}`);
           }
-        });
-        log.verbose(`duplicate refs count: ${dupsCount}`);
-      } else {
-        log.verbose(`not getting children for ${uri}`);
-      }
-      log.info(`queue ${siteQueue.length} uri ${uri}`);
-    } catch (err) {
-      log.error(`failure getting ${uri}: ${err.stack}`);
+          log.info(`queue ${siteQueue.length} uri ${uri}`);
+        } catch (err) {
+          log.error(`failure getting ${uri}: ${err.stack}`);
+        }
+      }};
+      taskRunner.addTask(job, callback);
     }
+    await taskRunner.promiseDone();
   }
-  driver.quit();
+  console.log('quitting');
+  drivers.forEach(driver => driver.quit());
 }
 
 main();
