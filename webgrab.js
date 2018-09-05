@@ -110,11 +110,11 @@ async function loadURI(uri, driver) {
     try {
       var headers = await getHeaders(uri);
     } catch (err) {
-      throw new Error('failure in getHeaders: ' + err.stack);
+      throw new Error('failure in getHeaders:\n' + err.stack);
     }
     const contentType = headers.get('Content-Type');
     // Don't ask ask the browser to download non-html
-    if (!contentType.startsWith('text/html') && !contentType.startsWith('application/xhtml+xml')) {
+    if (!contentType || (!contentType.startsWith('text/html') && !contentType.startsWith('application/xhtml+xml'))) {
       // download anyway to cache
       log.verbose('Content-type: ' + contentType + ' Using fetch to cache non-html uri ' + uri);
       await fetch(uri);
@@ -127,11 +127,11 @@ async function loadURI(uri, driver) {
     const documentURI = await driver.executeScript('return document.documentURI');
 
     const elements = await driver.findElements(By.css('a'));
-    log.verbose(`references length is ${elements.length}`);
+    log.verbose(`references length is ${elements.length} for uri ${uri}`);
 
     for (let element of elements) {
       const href = await element.getAttribute('href');
-      if (href === '#') continue; // TODO - handle these
+      if (!href || href === '#') continue; // TODO - handle #
       const uriObj = new URL(href, documentURI);
       // references are dups
       uriObj.hash = '';
@@ -142,7 +142,7 @@ async function loadURI(uri, driver) {
     hrefUris.forEach(entry => entries.push(entry));
     return entries;
   } catch (err) {
-    throw new Error(`Failure in loadURI: ${err.stack}`, err);
+    throw new Error(`Failure in loadURI:\n${err.stack}`, err);
   }
 }
 
@@ -197,6 +197,7 @@ async function main() {
   const seenSites = new Set();
   const pendingSites = new Set();
   const siteQueue = [];
+  let siteCount = 0;
 
   // Queue the starting list of sites for processing.
   siteList.forEach(siteItem => {
@@ -204,6 +205,7 @@ async function main() {
     if (!pendingSites.has(uri)) {
       pendingSites.add(uri);
       siteQueue.push(siteItem);
+      siteCount++;
     }
   });
 
@@ -212,88 +214,98 @@ async function main() {
     for (let siteItem = siteQueue.shift(); siteItem; siteItem = siteQueue.shift()) {
       const uri = siteItem.site;
       const job = async(driver) => {
-        // load the uri for the current item, getting the references
-        pendingSites.delete(uri);
-        const siteRefs = await loadURI(uri, driver);
-        return siteRefs;
-      };
-      const callback = {onFulfilled: (siteRefs) => {
         try {
-          seenSites.add(uri);
-          if (siteRefs) {
-            log.verbose(`${siteRefs.length} references found for site ${uri}`);
-          }
-          // manage handling of child references of this site
-          const uriObj = new URL(uri);
-          const currentHost = uriObj.host;
-
-          if (siteItem.getChildren && siteItem.depth > 0) {
-            let dupsCount = 0;
-            siteRefs.forEach(ref => {
-              if (seenSites.has(ref) || pendingSites.has(ref)) {
-                dupsCount++;
-                return; // already processed this site
-              }
-
-              // Should we get this reference uri?
-              const refObject = new URL(ref);
-              // by default, get if hosts match
-              let getMe = refObject.host === currentHost;
-              // but reject certain sites
-              siteItem.dontGetChildren.forEach(regex => {
-                if (regex.test(ref)) {
-                  getMe = false;
-                }
-              });
-              // but allow certain other sites
-              siteItem.alsoGetChildren.forEach(regex => {
-                if (regex.test(ref)) {
-                  getMe = true;
-                }
-              });
-
-              if (getMe) {
-                // set the child getChildren option based on the parent expandChildren
-                let expandChildren = siteItem.expandChildren;
-                siteItem.dontExpandChildren.forEach(regex => {
-                  if (regex.test(ref)) {
-                    expandChildren = false;
-                  }
-                });
-                siteItem.alsoExpandChildren.forEach(regex => {
-                  if (regex.test(ref)) {
-                    expandChildren = true;
-                  }
-                });
-                const childItem = clone(siteItem);
-                childItem.site = ref;
-                childItem.getChildren = expandChildren;
-                childItem.depth--;
-                let wouldDo = '(would) ';
-                if (!referencesOnly || childItem.depth > 0) {
-                  pendingSites.add(ref);
-                  siteQueue.push(childItem);
-                  wouldDo = '';
-                }
-                log.verbose(`${wouldDo}Add to site queue: ${ref}`);
-              } else {
-                log.verbose(`Not adding to site queue: ${ref}`);
-              }
-            });
-            log.verbose(`duplicate refs count: ${dupsCount}`);
-          } else {
-            log.verbose(`not getting children for ${uri}`);
-          }
-          log.info(`queue ${siteQueue.length} uri ${uri}`);
+          // load the uri for the current item, getting the references
+          pendingSites.delete(uri);
+          const siteRefs = await loadURI(uri, driver);
+          return siteRefs;
         } catch (err) {
-          log.error(`failure getting ${uri}: ${err.stack}`);
+          throw new Error(`Failure in taskrunner job:\n${err.stack}`, err);
         }
-      }};
+      };
+      const callback = {
+        onFulfilled: (siteRefs) => {
+          try {
+            seenSites.add(uri);
+            if (siteRefs) {
+              log.verbose(`${siteRefs.length} references found for site ${uri}`);
+            }
+            // manage handling of child references of this site
+            const uriObj = new URL(uri);
+            const currentHost = uriObj.host;
+
+            if (siteItem.getChildren && siteItem.depth > 0) {
+              let dupsCount = 0;
+              siteRefs.forEach(ref => {
+                if (seenSites.has(ref) || pendingSites.has(ref)) {
+                  dupsCount++;
+                  return; // already processed this site
+                }
+
+                // Should we get this reference uri?
+                const refObject = new URL(ref);
+                // by default, get if hosts match
+                let getMe = refObject.host === currentHost;
+                // but reject certain sites
+                siteItem.dontGetChildren.forEach(regex => {
+                  if (regex.test(ref)) {
+                    getMe = false;
+                  }
+                });
+                // but allow certain other sites
+                siteItem.alsoGetChildren.forEach(regex => {
+                  if (regex.test(ref)) {
+                    getMe = true;
+                  }
+                });
+
+                if (getMe) {
+                  // set the child getChildren option based on the parent expandChildren
+                  let expandChildren = siteItem.expandChildren;
+                  siteItem.dontExpandChildren.forEach(regex => {
+                    if (regex.test(ref)) {
+                      expandChildren = false;
+                    }
+                  });
+                  siteItem.alsoExpandChildren.forEach(regex => {
+                    if (regex.test(ref)) {
+                      expandChildren = true;
+                    }
+                  });
+                  const childItem = clone(siteItem);
+                  childItem.site = ref;
+                  childItem.getChildren = expandChildren;
+                  childItem.depth--;
+                  let wouldDo = '(would) ';
+                  if (!referencesOnly || childItem.depth > 0) {
+                    pendingSites.add(ref);
+                    siteQueue.push(childItem);
+                    siteCount++;
+                    wouldDo = '';
+                  }
+                  log.verbose(`${wouldDo}Add to site queue: ${ref}`);
+                } else {
+                  log.verbose(`Not adding to site queue: ${ref}`);
+                }
+              });
+              log.verbose(`duplicate refs count: ${dupsCount}`);
+            } else {
+              log.verbose(`not getting children for ${uri}`);
+            }
+            log.info(`queue ${siteQueue.length} uri ${uri}`);
+          } catch (err) {
+            log.error(`Failure getting ${uri}:\n${err.stack}`);
+          }
+        },
+        onRejected: (reason) => {
+          log.error(`Failure in job getting ${uri}:\n${reason}`);
+        }
+      };
       taskRunner.addTask(job, callback);
     }
     await taskRunner.promiseDone();
   }
-  console.log('quitting');
+  log.info('quitting, siteCount = ' + siteCount);
   drivers.forEach(driver => driver.quit());
 }
 
