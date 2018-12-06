@@ -16,6 +16,7 @@ const URL = require('url').URL;
 const fetch = require('node-fetch');
 const fs = require('fs-extra');
 const webdriver = require('selenium-webdriver');
+const firefox = require('selenium-webdriver/firefox');
 
 const getHeaders = require('./lib/getHeaders');
 const logging = require('./lib/logging');
@@ -99,14 +100,15 @@ function normalizeSiteList(siteList) {
  * loads a uri from the web
  * @param {string} uri the uri to load
  * @param {ThenableWebDriver} driver Selenium web driver object.
+ * @param {number} delay in Milliseconds to postpone parsing after page initial load
  * @returns {string[]} array of uri references from the <a> tags in the website
  * @see {@link {http://seleniumhq.github.io/selenium/docs/api/javascript/module/selenium-webdriver/}}
  */
-async function loadURI(uri, driver) {
+async function loadURI(uri, driver, delay) {
   const log = logging.log;
   try {
     /**/
-    log.info('loadURI: loading ' + uri);
+    // log.verbose('loadURI: loading ' + uri);
     try {
       var headers = await getHeaders(uri);
     } catch (err) {
@@ -124,6 +126,14 @@ async function loadURI(uri, driver) {
     const hrefUris = new Set();
     log.verbose(`loading uri ${uri} with driver`);
     await driver.get(uri);
+
+    // Sometimes results come in after initial load. Insert delay if requested.
+    if (delay) {
+      await new Promise(resolve => {
+        setTimeout(resolve, delay);
+      });
+    }
+
     const documentURI = await driver.executeScript('return document.documentURI');
 
     const elements = await driver.findElements(By.css('a'));
@@ -154,13 +164,15 @@ async function main() {
   // command line parameter setup
   commander
     .option('-c, --config-file [filepath]', 'Specify an alternative config file (default config.json)', 'config.json')
-    .option('-p, --public-ca', 'Use the public certificate authorities instead of the custom')
+    .option('-g, --general-ca', 'Use the general, public certificate authorities instead of the custom')
     .option('-r, --references-only', 'Only log references when depth reaches 0 rather than get')
     .option('-b, --browser [browser]', 'browser to use (default firefox, allowed firefox or chrome)', 'firefox')
     .option('-n, --browsercount [browsercount]', 'Number of instances of the browser to use, default 1', 1)
+    .option('-p, --profile [profile]', 'Path to custom profile', '')
+    .option('-d, --delay [delay]', 'delay in milliseconds after initial load to parse', 0)
     .parse(process.argv);
 
-  const {configFile, publicCa, referencesOnly, browser, browsercount} = commander;
+  const {configFile, generalCa, referencesOnly, browser, browsercount, profile, delay} = commander;
 
   const allowedBrowsers = ['firefox', 'chrome'];
   if (!allowedBrowsers.includes(browser)) {
@@ -168,6 +180,9 @@ async function main() {
     process.exit(1);
   }
 
+  // const profile = 'D:\\Caspia\\selenium\\6gw9ki1i.selenium-zendesk';
+  // const profile = '';
+  // const profile = 'garbage';
   const logFilePath = process.env.WEBGRAB_LOGFILEPATH || process.env.HOME + '/logs';
   console.log('Logging to ' + logFilePath);
   const log = logging.setupLogging(logFilePath);
@@ -181,15 +196,18 @@ async function main() {
   const taskRunner = new TaskRunner();
   const drivers = [];
   for (let count = 0; count < browsercount; count++) {
-    const driver = new webdriver.Builder()
-      .withCapabilities({browserName: browser, acceptInsecureCerts: true})
-      .build();
+    const builder = new webdriver.Builder()
+      .withCapabilities({browserName: browser, acceptInsecureCerts: true});
+    if (browser === 'firefox' && profile) {
+      builder.setFirefoxOptions((new firefox.Options().setProfile(profile)));
+    }
+    const driver = builder.build();
     drivers.push(driver);
   }
   drivers.forEach(driver => taskRunner.addResource(driver));
 
   // see https://stackoverflow.com/questions/31673587/error-unable-to-verify-the-first-certificate-in-nodejs
-  if (!publicCa) {
+  if (!generalCa) {
     require('https').globalAgent.options.ca = fs.readFileSync('ca.crt');
   }
 
@@ -217,7 +235,7 @@ async function main() {
         try {
           // load the uri for the current item, getting the references
           pendingSites.delete(uri);
-          const siteRefs = await loadURI(uri, driver);
+          const siteRefs = await loadURI(uri, driver, delay);
           return siteRefs;
         } catch (err) {
           throw new Error(`Failure in taskrunner job:\n${err.stack}`, err);
