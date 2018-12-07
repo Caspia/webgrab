@@ -116,7 +116,10 @@ async function loadURI(uri, driver, delay) {
     }
     const contentType = headers.get('Content-Type');
     // Don't ask ask the browser to download non-html
-    if (!contentType || (!contentType.startsWith('text/html') && !contentType.startsWith('application/xhtml+xml'))) {
+    if (!contentType ||
+         (!contentType.startsWith('text/html') &&
+          !contentType.startsWith('application/xhtml+xml') &&
+          !contentType.startsWith('multipart'))) {
       // download anyway to cache
       log.verbose('Content-type: ' + contentType + ' Using fetch to cache non-html uri ' + uri);
       await fetch(uri);
